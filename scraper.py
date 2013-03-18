@@ -92,6 +92,9 @@ class TimetableParser(HTMLParser):
             self.event_times = True
             self.index += 1
 
+    def td_end(self):
+        self.event_times = False
+
     def handle_starttag(self, tag, attrs):
         func = getattr(self, tag + '_start', None)
         if func:
@@ -103,6 +106,8 @@ class TimetableParser(HTMLParser):
             func()
 
     def handle_data(self, data):
+        if not self.in_timetable:
+            return
         if self.timing_point:
             self.current_stop = data.strip()
             self.current_stop_type = 'major'
@@ -113,7 +118,6 @@ class TimetableParser(HTMLParser):
             self.intermediate_stop = False
         elif self.event_times:
             self.add_time(data.strip())
-            self.event_times = False
 
     def add_time(self, time):
         timelist = self.timelists[self.index]
