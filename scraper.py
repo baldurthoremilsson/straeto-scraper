@@ -9,23 +9,43 @@ from collections import defaultdict
 from datetime import date, timedelta
 from HTMLParser import HTMLParser
 
-ROUTES = [
-    # Höfuðborgarsvæðið
-    1,2,3,4,5,6,
-    11,12,13,14,15,17,18,19,
-    21,22,23,24,26,27,28,
-    31,33,34,35,
-    43,44,
-    # Suðurland
-    # 51,52,
-    # 71,72,73,74,75,
-    # Vestur- og Norðurland
-    # 57,58,59,
-    # 81,82,83,84,
-    # Norður- og Norðausturland
-    # 56,
-    # 78,79,
-]
+ALL_DAYS = ['weekday', 'saturday', 'sunday']
+ALL_BUT_SUNDAY = ['weekday', 'saturday']
+WEEKDAYS = ['weekday']
+
+ROUTES = {
+    1: { 'directions': 2, 'days': ALL_DAYS },
+    2: { 'directions': 2, 'days': ALL_DAYS },
+    3: { 'directions': 2, 'days': ALL_DAYS },
+    4: { 'directions': 2, 'days': ALL_DAYS },
+    5: { 'directions': 2, 'days': ALL_DAYS },
+    6: { 'directions': 2, 'days': ALL_DAYS },
+
+    11: { 'directions': 2, 'days': ALL_DAYS },
+    12: { 'directions': 2, 'days': ALL_DAYS },
+    13: { 'directions': 2, 'days': ALL_DAYS },
+    14: { 'directions': 2, 'days': ALL_DAYS },
+    15: { 'directions': 2, 'days': ALL_DAYS },
+    17: { 'directions': 2, 'days': ALL_BUT_SUNDAY },
+    18: { 'directions': 2, 'days': ALL_DAYS },
+    19: { 'directions': 2, 'days': ALL_DAYS },
+
+    21: { 'directions': 2, 'days': ALL_BUT_SUNDAY },
+    22: { 'directions': 2, 'days': WEEKDAYS },
+    23: { 'directions': 1, 'days': ALL_DAYS },
+    24: { 'directions': 2, 'days': ALL_DAYS },
+    26: { 'directions': 2, 'days': WEEKDAYS },
+    27: { 'directions': 1, 'days': ALL_DAYS },
+    28: { 'directions': 2, 'days': ALL_DAYS },
+
+    31: { 'directions': 2, 'days': WEEKDAYS },
+    33: { 'directions': 1, 'days': WEEKDAYS },
+    34: { 'directions': 1, 'days': WEEKDAYS },
+    35: { 'directions': 1, 'days': ALL_DAYS },
+
+    43: { 'directions': 1, 'days': ALL_DAYS },
+    44: { 'directions': 1, 'days': ALL_DAYS },
+}
 
 class HSSParser(HTMLParser):
     def __init__(self, content, *args, **kwargs):
@@ -293,17 +313,23 @@ def next_sunday():
     return today + timedelta(days=(6 - weekday) % 7)
 
 def main():
-    for route in ROUTES:
+    for route, data in ROUTES.iteritems():
         info = {}
+        directions = range(data['directions'])
+        days = data['days']
+
         # get weekday
-        dt = next_weekday()
-        info['weekday'] = scrape(route, [0,1], dt)
+        if 'weekday' in days:
+            dt = next_weekday()
+            info['weekday'] = scrape(route, directions, dt)
         # get saturday
-        dt = next_saturday()
-        info['saturday'] = scrape(route, [0,1], dt)
+        if 'saturday' in days:
+            dt = next_saturday()
+            info['saturday'] = scrape(route, directions, dt)
         # get sunday
-        dt = next_sunday()
-        info['sunday'] = scrape(route, [0,1], dt)
+        if 'sunday' in days:
+            dt = next_sunday()
+            info['sunday'] = scrape(route, directions, dt)
 
         save_route(info, route)
         time.sleep(10)
