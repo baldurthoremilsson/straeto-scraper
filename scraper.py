@@ -172,7 +172,7 @@ class RouteNameParser(HTMLParser):
     def handle_data(self, data):
         if not self.in_data and not self.route_name:
             return
-        match = re.match(r'\d+ -\W+(.*)', data)
+        match = re.match(r'\d+ -\W+(.*)', data, re.UNICODE)
         if not match:
             return
         self.route_name = match.groups()[0].encode('utf-8')
