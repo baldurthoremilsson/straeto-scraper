@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-stops = {
+stop_ids = {
     1: (
         ( # Hlemmur » Kópavogur » Garðabær » Fjörður » Vellir
             90000295, # Hlemmur
@@ -1750,7 +1750,7 @@ stops = {
     ),
 }
 
-stopnames = {
+stop_names = {
     10000802: 'Hamraborg',
     10000804: 'Kópavogsbraut / Sunnuhlíð',
     10000805: 'Kópavogsbraut / Urðarbraut',

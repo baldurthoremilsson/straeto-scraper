@@ -9,6 +9,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from HTMLParser import HTMLParser
 
+from stops import stop_ids, stop_names
+
 ALL_DAYS = ['weekday', 'saturday', 'sunday']
 ALL_BUT_SUNDAY = ['weekday', 'saturday']
 WEEKDAYS = ['weekday']
@@ -77,8 +79,9 @@ class ContinueParser(HTMLParser):
             self.handle_input(dict(attrs))
 
 class TimetableParser(HTMLParser):
-    def __init__(self, content, timetable, *args, **kwargs):
+    def __init__(self, content, timetable, ids, *args, **kwargs):
         HTMLParser.__init__(self, *args, **kwargs)
+        self.ids = ids
         self.in_timetable = False
         self.index = -1
         self.timing_point = False
@@ -142,7 +145,7 @@ class TimetableParser(HTMLParser):
     def add_time(self, time):
         timelist = self.timelists[self.index]
         timelist.append({
-            'stop': self.current_stop.encode('utf-8'),
+            'stop': self.ids[self.index],
             'type': self.current_stop_type,
             'time': time,
         })
@@ -265,19 +268,26 @@ def save_route(info, route):
     with open(filename, 'w') as f:
         json.dump(info, f, indent=2, ensure_ascii=False)
 
+def save_names(names):
+    print 'Saving stop names'
+    filename = 'stop-names.json'
+    with open(filename, 'w') as f:
+        json.dump(names, f, indent=2, ensure_ascii=False)
+
 def scrape_data(route, direction, dt):
     stops = []
+    ids = stop_ids[route][direction]
     response = session.post(URL1, data=data1(route, dt))
     response = session.post(URL2, data=data2(direction, response))
     response = session.post(URL3, data=data3(response))
     response = session.post(URL4, data=data4(response))
-    tp = TimetableParser(response.text, stops)
+    tp = TimetableParser(response.text, stops, ids)
     valid = ValidParser(response.text).valid
     route_name = RouteNameParser(response.text).route_name
     cont = ContinueParser(response.text).cont
     while cont:
         response = session.post(URL5, data=data5(response))
-        tp = TimetableParser(response.text, stops)
+        tp = TimetableParser(response.text, stops, ids)
         cont = ContinueParser(response.text).cont
     return route_name, valid, stops
 
@@ -314,25 +324,31 @@ def next_sunday():
 
 def main():
     for route, data in ROUTES.iteritems():
-        info = {}
+        schedule = {}
+        info = {
+            'routes': stop_ids[route],
+            'schedule': schedule,
+        }
         directions = range(data['directions'])
         days = data['days']
 
         # get weekday
         if 'weekday' in days:
             dt = next_weekday()
-            info['weekday'] = scrape(route, directions, dt)
+            schedule['weekday'] = scrape(route, directions, dt)
         # get saturday
         if 'saturday' in days:
             dt = next_saturday()
-            info['saturday'] = scrape(route, directions, dt)
+            schedule['saturday'] = scrape(route, directions, dt)
         # get sunday
         if 'sunday' in days:
             dt = next_sunday()
-            info['sunday'] = scrape(route, directions, dt)
+            schedule['sunday'] = scrape(route, directions, dt)
 
         save_route(info, route)
         time.sleep(10)
+
+    save_names(stop_names)
 
 if __name__ == "__main__":
     main()
