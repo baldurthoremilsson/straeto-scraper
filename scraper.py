@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import sys
 import json
 import re
 import requests
@@ -9,7 +10,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from HTMLParser import HTMLParser
 
-from stops import stop_ids, stop_names
+from stations import station_ids, station_names
 
 ALL_DAYS = ['weekday', 'saturday', 'sunday']
 ALL_BUT_SUNDAY = ['weekday', 'saturday']
@@ -84,6 +85,7 @@ class TimetableParser(HTMLParser):
         self.ids = ids
         self.in_timetable = False
         self.index = -1
+        self.station_index = -1
         self.timing_point = False
         self.intermediate_stop = False
         self.event_times = False
@@ -98,6 +100,7 @@ class TimetableParser(HTMLParser):
     def table_start(self, attrs):
         if attrs.get('class', '') == 'timetable':
             self.in_timetable = True
+            self.station_index = -1
 
     def table_end(self):
         self.in_timetable = False
@@ -109,14 +112,18 @@ class TimetableParser(HTMLParser):
         cl = attrs.get('class', '').split()
         if 'timingPoint' in cl:
             self.timing_point = True
+            self.station_index += 1
         elif 'intermediateStop' in cl:
             self.intermediate_stop = True
+            self.station_index += 1
         elif 'eventTimes' in cl:
             self.event_times = True
             self.index += 1
 
     def td_end(self):
-        self.event_times = False
+        if self.event_times:
+            self.add_time('')
+            self.event_times = False
 
     def handle_starttag(self, tag, attrs):
         func = getattr(self, tag + '_start', None)
@@ -141,39 +148,15 @@ class TimetableParser(HTMLParser):
             self.intermediate_stop = False
         elif self.event_times:
             self.add_time(data.strip())
+            self.event_times = False
 
     def add_time(self, time):
         timelist = self.timelists[self.index]
         timelist.append({
-            'stop': self.ids[self.index],
+            'station': self.ids[self.station_index],
             'type': self.current_stop_type,
             'time': time,
         })
-
-class ValidParser(HTMLParser):
-    def __init__(self, content, *args, **kwargs):
-        HTMLParser.__init__(self, *args, **kwargs)
-        self.in_superseded = False
-        self.in_data = False
-        self.valid = None
-        self.feed(self.unescape(content))
-
-    def handle_starttag(self, tag, attrs):
-        if tag != 'span':
-            return
-        attrs = dict(attrs)
-        if not self.in_superseded and attrs.get('id', '') == 'search_timetableSuperseded':
-            self.in_superseded = True
-        elif self.in_superseded and attrs.get('class', '') == 'data':
-            self.in_data = True
-
-    def handle_data(self, data):
-        if not self.in_data:
-            return
-        data = data.strip()
-        self.valid = '%s-%s-%s' % (data[6:10], data[3:5], data[0:2])
-        self.in_superseded = False
-        self.in_data = False
 
 class RouteNameParser(HTMLParser):
     def __init__(self, content, *args, **kwargs):
@@ -202,10 +185,10 @@ class RouteNameParser(HTMLParser):
         self.in_timetable_name = False
         self.in_data = False
 
-def data1(route, dt):
+def data1(route_id, dt):
     return {
         'hss': get_hss(),
-        'serviceNumber': route,
+        'serviceNumber': route_id,
         'serviceTime': '0:00:00', #'%d:%02d:%02d' % (dt.hour, dt.minute, dt.second),
         'serviceTimeH': 0,
         'serviceTimeM': 0,
@@ -215,10 +198,10 @@ def data1(route, dt):
         'methoddefaultMethod': 'Leita...',
     }
 
-def data2(selectedIndex, response):
+def data2(dir_index, response):
     return {
         'hss': get_hss(response),
-        'selectedIndex': selectedIndex,
+        'selectedIndex': dir_index,
         'displayedStops': range(200),
         'methodnext': 'Fletta upp leiðakerfi...',
     }
@@ -269,38 +252,28 @@ def save_route(info, route):
         json.dump(info, f, indent=2, ensure_ascii=False)
 
 def save_names(names):
-    print 'Saving stop names'
-    filename = 'stop-names.json'
+    print 'Saving station names'
+    filename = 'station-names.json'
     with open(filename, 'w') as f:
         json.dump(names, f, indent=2, ensure_ascii=False)
 
-def scrape_data(route, direction, dt):
+def scrape_direction(route_id, dir_index, dt):
+    dir_name = None
     stops = []
-    ids = stop_ids[route][direction]
-    response = session.post(URL1, data=data1(route, dt))
-    response = session.post(URL2, data=data2(direction, response))
+
+    ids = station_ids[route_id][dir_index]
+    response = session.post(URL1, data=data1(route_id, dt))
+    response = session.post(URL2, data=data2(dir_index, response))
     response = session.post(URL3, data=data3(response))
     response = session.post(URL4, data=data4(response))
     tp = TimetableParser(response.text, stops, ids)
-    valid = ValidParser(response.text).valid
-    route_name = RouteNameParser(response.text).route_name
+    dir_name = RouteNameParser(response.text).route_name
     cont = ContinueParser(response.text).cont
     while cont:
         response = session.post(URL5, data=data5(response))
         tp = TimetableParser(response.text, stops, ids)
         cont = ContinueParser(response.text).cont
-    return route_name, valid, stops
-
-def scrape(route, directions, dt):
-    info = []
-    for direction in directions:
-        route_name, valid, stops = scrape_data(route, direction, dt)
-        info.append({
-            'name': route_name,
-            'valid': valid,
-            'stops': stops,
-        })
-    return info
+    return dir_name, stops
 
 def next_weekday():
     today = date.today()
@@ -322,33 +295,38 @@ def next_sunday():
     weekday = today.weekday()
     return today + timedelta(days=(6 - weekday) % 7)
 
+def next_day(day):
+    if day == 'weekday':
+        return next_weekday()
+    if day == 'saturday':
+        return next_saturday()
+    if day == 'sunday':
+        return next_sunday()
+
 def main():
-    for route, data in ROUTES.iteritems():
-        schedule = {}
-        info = {
-            'routes': stop_ids[route],
-            'schedule': schedule,
+    for route_id, route_options in ROUTES.iteritems():
+        schedule = {
+            'id': route_id,
+            'directions': [],
         }
-        directions = range(data['directions'])
-        days = data['days']
+        for dir_index in range(route_options['directions']):
+            dir_schedule = {}
+            direction = {
+                'name': None,
+                'stations': station_ids[route_id][dir_index],
+                'schedule': dir_schedule,
+            }
+            for day in route_options['days']:
+                dt = next_day(day)
+                dir_name, stops = scrape_direction(route_id, dir_index, dt)
+                dir_schedule[day] = stops
+            direction['name'] = dir_name
+            schedule['directions'].append(direction)
 
-        # get weekday
-        if 'weekday' in days:
-            dt = next_weekday()
-            schedule['weekday'] = scrape(route, directions, dt)
-        # get saturday
-        if 'saturday' in days:
-            dt = next_saturday()
-            schedule['saturday'] = scrape(route, directions, dt)
-        # get sunday
-        if 'sunday' in days:
-            dt = next_sunday()
-            schedule['sunday'] = scrape(route, directions, dt)
-
-        save_route(info, route)
+        save_route(schedule, route_id)
         time.sleep(10)
 
-    save_names(stop_names)
+    save_names(station_names)
 
 if __name__ == "__main__":
     main()
