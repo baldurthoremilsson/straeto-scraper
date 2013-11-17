@@ -303,28 +303,34 @@ def next_day(day):
     if day == 'sunday':
         return next_sunday()
 
-def main():
-    for route_id, route_options in ROUTES.iteritems():
-        schedule = {
-            'id': route_id,
-            'directions': [],
+def scrape_route(route_id, route_options):
+    schedule = {
+        'id': route_id,
+        'directions': [],
+    }
+    for dir_index in range(route_options['directions']):
+        dir_schedule = {}
+        direction = {
+            'name': None,
+            'stations': station_ids[route_id][dir_index],
+            'schedule': dir_schedule,
         }
-        for dir_index in range(route_options['directions']):
-            dir_schedule = {}
-            direction = {
-                'name': None,
-                'stations': station_ids[route_id][dir_index],
-                'schedule': dir_schedule,
-            }
-            for day in route_options['days']:
-                dt = next_day(day)
-                dir_name, stops = scrape_direction(route_id, dir_index, dt)
-                dir_schedule[day] = stops
+        for day in route_options['days']:
+            dt = next_day(day)
+            dir_name, stops = scrape_direction(route_id, dir_index, dt)
+            dir_schedule[day] = stops
             direction['name'] = dir_name
             schedule['directions'].append(direction)
 
-        save_route(schedule, route_id)
-        time.sleep(10)
+    save_route(schedule, route_id)
+
+def main():
+    for route_id, route_options in ROUTES.iteritems():
+        try:
+            scrape_route(route_id, route_options)
+            time.sleep(10)
+        except Exception, e:
+            print 'Error scraping route %d' % route_id
 
     save_names(station_names)
 
