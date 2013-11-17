@@ -151,7 +151,12 @@ class TimetableParser(HTMLParser):
             self.event_times = False
 
     def add_time(self, time):
+        # Skip stops with no times.
+        if len(time) is 0:
+            return
+
         timelist = self.timelists[self.index]
+
         timelist.append({
             'station': self.ids[self.station_index],
             'type': self.current_stop_type,
