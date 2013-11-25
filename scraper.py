@@ -325,7 +325,7 @@ def scrape_route(route_id, route_options):
             dir_name, stops = scrape_direction(route_id, dir_index, dt)
             dir_schedule[day] = stops
             direction['name'] = dir_name
-            schedule['directions'].append(direction)
+        schedule['directions'].append(direction)
 
     save_route(schedule, route_id)
 
