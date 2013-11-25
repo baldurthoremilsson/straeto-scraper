@@ -71,6 +71,8 @@ def create_schema(conn):
         )
     ''')
 
+    c.execute('CREATE INDEX stop_index ON stop(direction_id, station_id, inttime)')
+
 
 def get_inttime(weekday, time):
     hour = int(time[:2])
