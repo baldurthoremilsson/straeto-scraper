@@ -36,3 +36,6 @@ nosetests.xml
 
 # Json output
 route-*.json
+
+# SQLite DB
+straeto.db

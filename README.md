@@ -20,3 +20,19 @@ files are:
     $ gunicorn srvr:app
 
 Now you can browse the timetables on http://localhost:8000.
+
+
+API
+---
+ 
+api.py contains a simple JSON API interface that uses the scraped data. Before
+running the API an SQLite DB needs to be created from the JSON files from the
+scraper. Create the DB:
+
+    $ ./create-db.py
+
+and then run the API:
+
+    $ python api.py
+
+It depends on [Flask](http://flask.pocoo.org/).
