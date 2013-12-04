@@ -9,15 +9,6 @@ import re
 
 
 ROUTE_FILE_REGEX = re.compile(r'route-[0-9]{2}\.json')
-WEEKDAYS = {
-    1: 'weekday',
-    2: 'weekday',
-    3: 'weekday',
-    4: 'weekday',
-    5: 'weekday',
-    6: 'saturday',
-    7: 'sunday'
-}
 
 
 def get_stations():
@@ -65,19 +56,12 @@ def create_schema(conn):
         CREATE TABLE stop(
             direction_id INTEGER REFERENCES direction(id),
             station_id INTEGER REFERENCES station(id),
-            weekday INTEGER,
-            time TEXT,
-            inttime INTEGER
+            day TEXT,
+            time TEXT
         )
     ''')
 
-    c.execute('CREATE INDEX stop_index ON stop(direction_id, station_id, inttime)')
-
-
-def get_inttime(weekday, time):
-    hour = int(time[:2])
-    minute = int(time[3:])
-    return weekday * 10000 + hour * 60 + minute
+    c.execute('CREATE INDEX stop_index ON stop(direction_id, station_id, day, time)')
 
 
 def populate(conn):
@@ -104,21 +88,17 @@ def populate(conn):
                         ordering
                     ) VALUES(?, ?, ?)
                 ''', (direction_id, station_id, ordering))
-            for weekday, route_day in WEEKDAYS.iteritems():
-                if route_day not in direction['schedule']:
-                    continue
-                for trip in direction['schedule'][route_day]:
+            for day, schedule in direction['schedule'].iteritems():
+                for trip in schedule:
                     for stop in trip:
-                        inttime = get_inttime(weekday, stop['time'])
                         c.execute('''
                             INSERT INTO stop(
                                 direction_id,
                                 station_id,
-                                weekday,
-                                time,
-                                inttime
-                            ) VALUES(?, ?, ?, ?, ?)
-                        ''', (direction_id, stop['station'], weekday, stop['time'], inttime))
+                                day,
+                                time
+                            ) VALUES(?, ?, ?, ?)
+                        ''', (direction_id, stop['station'], day, stop['time']))
 
     conn.commit()
 

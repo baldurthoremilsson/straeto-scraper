@@ -1,23 +1,17 @@
 # -*- coding: utf-8 -*-
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from time import strptime, mktime
 
 from flask import Flask, g, request, jsonify
 
+from fridagar import get_holidays
+
 
 app = Flask(__name__)
 DATABASE = 'straeto.db'
-WEEKDAYS = {
-    1: 'monday',
-    2: 'tuesday',
-    3: 'wednesday',
-    4: 'thursday',
-    5: 'friday',
-    6: 'saturday',
-    7: 'sunday'
-}
+
 
 def get_db():
     db = getattr(g, '_database', None)
@@ -55,32 +49,48 @@ def get_directions(station):
     return curs.fetchall()
 
 
+def get_weekday(day):
+    if day.month == 12 and day.day == 25 or day.month == 1 and day.day == 1:
+        return 'none'
+    if day.month == 12 and day.day in (24, 31):
+        return 'holiday'
+    holidays = get_holidays(day.year)
+    if day in holidays or day.weekday() == 6:
+        return 'sunday'
+    if day.weekday() == 5:
+        return 'saturday'
+    return 'weekday'
+
+
 def get_stops(station, direction, time, stops):
     stoplist = []
-    inttime = (time.weekday() + 1) * 10000 + time.hour * 60 + time.minute
-    curs = get_db().execute('''
-        SELECT time, weekday, 1 as ordering, inttime
-        FROM stop
-        WHERE station_id = :station AND direction_id = :direction AND inttime >= :inttime
-        UNION
-        SELECT time, weekday, 2 as ordering, inttime
-        FROM stop
-        WHERE station_id = :station AND direction_id = :direction AND inttime < :inttime
-        ORDER BY ordering, inttime
-        LIMIT :stops
-    ''',
-    {
-        'station': station,
-        'direction': direction,
-        'inttime': inttime,
-        'stops': stops,
-    })
-    for stop in curs.fetchall():
-        stoplist.append({
-            'time': stop[0], 
-            'weekday': WEEKDAYS[stop[1]]
+    day = time.date()
+    time_str = time.strftime('%H:%M')
+    while len(stoplist) < stops:
+        weekday = get_weekday(day)
+        curs = get_db().execute('''
+            SELECT time
+            FROM stop
+            WHERE station_id = :station
+              AND direction_id = :direction
+              AND day = :day
+              AND time >= :time
+            ORDER BY time
+        ''', {
+            'station': station,
+            'direction': direction,
+            'day': weekday,
+            'time': time_str,
         })
-    return stoplist
+        for stop in curs.fetchall():
+            stoplist.append({
+                'time': stop[0],
+                'date': day.strftime('%Y-%m-%d'),
+            })
+        day += timedelta(days=1)
+        time_str = '00:00'
+
+    return stoplist[:stops]
 
 
 def get_schedule(station, time, stops):
