@@ -11,44 +11,12 @@ from datetime import date, timedelta
 from HTMLParser import HTMLParser
 
 from stations import station_ids, station_names
+from fridagar import get_holidays
 
-ALL_DAYS = ['weekday', 'saturday', 'sunday']
-ALL_BUT_SUNDAY = ['weekday', 'saturday']
-WEEKDAYS = ['weekday']
 
-ROUTES = {
-    1: { 'directions': 2, 'days': ALL_DAYS },
-    2: { 'directions': 2, 'days': ALL_DAYS },
-    3: { 'directions': 2, 'days': ALL_DAYS },
-    4: { 'directions': 2, 'days': ALL_DAYS },
-    5: { 'directions': 2, 'days': ALL_DAYS },
-    6: { 'directions': 2, 'days': ALL_DAYS },
+class NoTimetableException(Exception):
+    pass
 
-    11: { 'directions': 2, 'days': ALL_DAYS },
-    12: { 'directions': 2, 'days': ALL_DAYS },
-    13: { 'directions': 2, 'days': ALL_DAYS },
-    14: { 'directions': 2, 'days': ALL_DAYS },
-    15: { 'directions': 2, 'days': ALL_DAYS },
-    17: { 'directions': 2, 'days': ALL_BUT_SUNDAY },
-    18: { 'directions': 2, 'days': ALL_DAYS },
-    19: { 'directions': 2, 'days': ALL_DAYS },
-
-    21: { 'directions': 2, 'days': ALL_BUT_SUNDAY },
-    22: { 'directions': 2, 'days': WEEKDAYS },
-    23: { 'directions': 1, 'days': ALL_DAYS },
-    24: { 'directions': 2, 'days': ALL_DAYS },
-    26: { 'directions': 2, 'days': WEEKDAYS },
-    27: { 'directions': 1, 'days': ALL_DAYS },
-    28: { 'directions': 2, 'days': ALL_DAYS },
-
-    31: { 'directions': 2, 'days': WEEKDAYS },
-    33: { 'directions': 1, 'days': WEEKDAYS },
-    34: { 'directions': 1, 'days': WEEKDAYS },
-    35: { 'directions': 1, 'days': ALL_DAYS },
-
-    43: { 'directions': 1, 'days': ALL_DAYS },
-    44: { 'directions': 1, 'days': ALL_DAYS },
-}
 
 class HSSParser(HTMLParser):
     def __init__(self, content, *args, **kwargs):
@@ -156,7 +124,6 @@ class TimetableParser(HTMLParser):
             return
 
         timelist = self.timelists[self.index]
-
         timelist.append({
             'station': self.ids[self.station_index],
             'type': self.current_stop_type,
@@ -250,11 +217,14 @@ def get_hss(response=None):
     parser = HSSParser(response.text)
     return parser.hss
 
-def save_route(info, route):
+def save_route(schedule, route):
     print 'Saving route %d' % route
+    for direction in schedule['directions']:
+        print '\t%s' % direction['name']
+    print
     filename = 'route-%02d.json' % route
     with open(filename, 'w') as f:
-        json.dump(info, f, indent=2, ensure_ascii=False)
+        json.dump(schedule, f, indent=2, ensure_ascii=False)
 
 def save_names(names):
     print 'Saving station names'
@@ -269,6 +239,11 @@ def scrape_direction(route_id, dir_index, dt):
     ids = station_ids[route_id][dir_index]
     response = session.post(URL1, data=data1(route_id, dt))
     response = session.post(URL2, data=data2(dir_index, response))
+    try:
+        response.text.index('No Timetable Found')
+        raise NoTimetableException('Route %d, direction %d, date %s' % (route_id, dir_index, str(dt)))
+    except ValueError:
+        pass
     response = session.post(URL3, data=data3(response))
     response = session.post(URL4, data=data4(response))
     tp = TimetableParser(response.text, stops, ids)
@@ -280,62 +255,63 @@ def scrape_direction(route_id, dir_index, dt):
         cont = ContinueParser(response.text).cont
     return dir_name, stops
 
-def next_weekday():
-    today = date.today()
-    weekday = today.weekday()
-    if weekday in [0, 1, 2, 3, 4]:
-        return today
-    if weekday == 5:
-        return today + timedelta(days=2)
-    if weekday == 6:
-        return today + timedelta(days=1)
+def next_weekday(day, holidays):
+    while day.weekday() in (5, 6) or day in holidays:
+        day += timedelta(days=1)
+    return day
 
-def next_saturday():
-    today = date.today()
-    weekday = today.weekday()
-    return today + timedelta(days=(5 - weekday) % 7)
+def next_saturday(day, holidays):
+    while day.weekday() != 5 or day in holidays:
+        day += timedelta(days=1)
+    return day
 
-def next_sunday():
-    today = date.today()
-    weekday = today.weekday()
-    return today + timedelta(days=(6 - weekday) % 7)
+def next_sunday(day, holidays):
+    while day.weekday() != 6 or day in holidays:
+        day += timedelta(days=1)
+    return day
 
-def next_day(day):
-    if day == 'weekday':
-        return next_weekday()
-    if day == 'saturday':
-        return next_saturday()
-    if day == 'sunday':
-        return next_sunday()
+def next_holiday(day):
+    return date(day.year, 12, 31)
 
-def scrape_route(route_id, route_options):
+def get_days(day, holidays):
+    return {
+        'weekday': next_weekday(day, holidays),
+        'saturday': next_saturday(day, holidays),
+        'sunday': next_sunday(day, holidays),
+        'holiday': next_holiday(day)
+    }
+
+def scrape_route(route_id, directions, days):
     schedule = {
         'id': route_id,
-        'directions': [],
+        'directions': []
     }
-    for dir_index in range(route_options['directions']):
+    for dir_index, stations in enumerate(directions):
         dir_schedule = {}
         direction = {
             'name': None,
-            'stations': station_ids[route_id][dir_index],
-            'schedule': dir_schedule,
+            'stations': stations,
+            'schedule': dir_schedule
         }
-        for day in route_options['days']:
-            dt = next_day(day)
-            dir_name, stops = scrape_direction(route_id, dir_index, dt)
-            dir_schedule[day] = stops
-            direction['name'] = dir_name
+        for day_name, date in days.iteritems():
+            try:
+                dir_name, stops = scrape_direction(route_id, dir_index, date)
+                dir_schedule[day_name] = stops
+                direction['name'] = dir_name
+            except NoTimetableException:
+                pass
         schedule['directions'].append(direction)
 
     save_route(schedule, route_id)
 
+
 def main():
-    for route_id, route_options in ROUTES.iteritems():
-        try:
-            scrape_route(route_id, route_options)
-            time.sleep(10)
-        except Exception, e:
-            print 'Error scraping route %d' % route_id
+    today = date.today()
+    holidays = get_holidays(today.year)
+    days = get_days(today, holidays)
+    for route_id, directions in station_ids.iteritems():
+        scrape_route(route_id, directions, days)
+        time.sleep(10)
 
     save_names(station_names)
 
