@@ -47,6 +47,42 @@ class ContinueParser(HTMLParser):
         if tag == 'input':
             self.handle_input(dict(attrs))
 
+
+class StationParser(HTMLParser):
+    def __init__(self, content, route, direction, stations, station_names, *args, **kwargs):
+        HTMLParser.__init__(self, *args, **kwargs)
+        self.stations = stations
+        self.route = route
+        self.direction = direction
+        self.station_names = station_names
+        self.page_stations = []
+        self.in_station_cell = False
+        self.feed(self.unescape(content))
+        self.compare()
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'td' and dict(attrs).get('class', '') in ('timingPoint', 'intermediateStop'):
+            self.in_station_cell = True
+        else:
+            self.in_station_cell = False
+
+    def handle_endtag(self, tag):
+        self.in_station_cell = False
+
+    def handle_data(self, data):
+        if self.in_station_cell:
+            self.page_stations.append(data.strip().encode('utf-8'))
+
+    def compare(self):
+        for i, station in enumerate(self.page_stations):
+            station_id = self.stations[i]
+            station_name = self.station_names[station_id]
+            if station_name != station:
+                err = 'Route %d, direction %d: station %d is %s but %s expected'
+                errmsg = err % (self.route, self.direction, i, station, station_name)
+                raise Exception(errmsg)
+
+
 class TimetableParser(HTMLParser):
     def __init__(self, content, timetable, ids, *args, **kwargs):
         HTMLParser.__init__(self, *args, **kwargs)
@@ -232,11 +268,10 @@ def save_names(names):
     with open(filename, 'w') as f:
         json.dump(names, f, indent=2, ensure_ascii=False)
 
-def scrape_direction(route_id, dir_index, dt):
+def scrape_direction(route_id, dir_index, stations, dt):
     dir_name = None
     stops = []
 
-    ids = station_ids[route_id][dir_index]
     response = session.post(URL1, data=data1(route_id, dt))
     response = session.post(URL2, data=data2(dir_index, response))
     try:
@@ -246,12 +281,13 @@ def scrape_direction(route_id, dir_index, dt):
         pass
     response = session.post(URL3, data=data3(response))
     response = session.post(URL4, data=data4(response))
-    tp = TimetableParser(response.text, stops, ids)
+    StationParser(response.text, route_id, dir_index, stations, station_names)
+    tp = TimetableParser(response.text, stops, stations)
     dir_name = RouteNameParser(response.text).route_name
     cont = ContinueParser(response.text).cont
     while cont:
         response = session.post(URL5, data=data5(response))
-        tp = TimetableParser(response.text, stops, ids)
+        tp = TimetableParser(response.text, stops, stations)
         cont = ContinueParser(response.text).cont
     return dir_name, stops
 
@@ -295,7 +331,7 @@ def scrape_route(route_id, directions, days):
         }
         for day_name, date in days.iteritems():
             try:
-                dir_name, stops = scrape_direction(route_id, dir_index, date)
+                dir_name, stops = scrape_direction(route_id, dir_index, stations, date)
                 dir_schedule[day_name] = stops
                 direction['name'] = dir_name
             except NoTimetableException:
@@ -310,7 +346,6 @@ def main():
     holidays = get_holidays(today.year)
     days = get_days(today, holidays)
     for route_id, directions in station_ids.iteritems():
-        if route_id != 6: continue
         scrape_route(route_id, directions, days)
         time.sleep(10)
 
